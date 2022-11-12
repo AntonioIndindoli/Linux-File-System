@@ -68,6 +68,8 @@ int initFileSystem (uint64_t numberOfBlocks, uint64_t blockSize) {
 
 	cwd = (directoryEntry*) malloc (2369);
 	LBAread (cwd, 5, 6); 
+
+	parsePath("test/test/test");
 	
 	free( buffer );
 	buffer = NULL;

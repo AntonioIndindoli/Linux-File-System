@@ -25,7 +25,8 @@ typedef struct ParseDir
 
 } ParseDir;
 
-struct ParseDir parsePath(const char *pathname)
+
+struct ParseDir* parsePath(const char *pathname)
 {
     ParseDir *pathInfo;
     int isRoot = 0;
@@ -34,6 +35,7 @@ struct ParseDir parsePath(const char *pathname)
     if (pathname[0] == '/'){
         isRoot  = 1;
     }
+    printf(pathname);
 
     int doOnce = 0;
     while (dirName != NULL)
@@ -42,7 +44,9 @@ struct ParseDir parsePath(const char *pathname)
             dirName = strtok(pathname, '/');
             if(isRoot == 1){
             dirName = strtok(NULL, pathname);
-            //if(not in working directory)
+            if(cwd[1].name){
+
+            }
             //then return error
             }
         }
@@ -55,7 +59,7 @@ struct ParseDir parsePath(const char *pathname)
         doOnce = 1;
     }
 
-    return *pathInfo;
+    return pathInfo;
 }
 
 fdDir *fs_opendir(const char *pathname)

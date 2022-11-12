@@ -28,3 +28,5 @@ typedef struct directoryEntry {
 void initDirEntry(directoryEntry *buffer, int i);
 
 int initDirectory (directoryEntry *parent);
+
+directoryEntry *cwd;

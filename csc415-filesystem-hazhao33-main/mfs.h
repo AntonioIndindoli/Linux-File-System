@@ -54,8 +54,8 @@ typedef struct
 	uint64_t directoryStartLocation; /*Starting LBA of directory */
 } fdDir;
 
-directoryEntry* cwd;
-struct ParseDir parsePath(const char *pathname);
+//directoryEntry *cwd;
+struct ParseDir* parsePath(const char *pathname);
 
 // Key directory functions
 int fs_mkdir(const char *pathname, mode_t mode);
