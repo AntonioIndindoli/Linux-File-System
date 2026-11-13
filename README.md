@@ -1,143 +1,137 @@
-# CSC415 Group Term Assignment - File System
+# Linux File System
 
-This is a GROUP assignment written in C.  Only one person on the team needs to submit the project.
+A custom file system in C that explores how a hierarchy of files and directories maps to blocks on disk. The project runs in user space, stores its volume in a regular host file, and exposes file-system operations through an interactive shell.
 
-Your team have been designing components of a file system.  You have defined the goals and designed the directory entry structure, the volume structure and the free space.  Now it is time to implement your file system.
+The implementation covers volume initialization, bitmap-based free-space management, directory metadata, path resolution, and an extent-based allocation design. It was developed by a four-person team for CSC 415: Operating Systems in Fall 2022.
 
-While each of you can have your own github, only one is what you use for the project to be turned in.  Make sure to list that one on the writeups.
+**Technologies:** C · Linux/POSIX APIs · GCC · Make · GNU Readline
 
-The project is in three phases.  The first phase is the "formatting" the volume.  This is further described in the steps for phase one and the phase one assignment.
+## Engineering highlights
 
-The second phase is the implementation of the directory based functions.  See Phase two assignment.
+- **Working directly with disk blocks.** File-system structures are read and written through a logical block address (LBA) interface. Initialization checks a volume signature to choose between formatting a volume and loading existing metadata.
+- **Compact free-space tracking.** A bitmap represents each logical block with one bit. Allocation scans for a contiguous free run; bitwise operations reserve and release blocks.
+- **Hierarchical namespace.** Directory routines handle absolute and relative paths, `.` and `..` entries, a current working directory, and file metadata. Path parsing distinguishes an existing entry, a missing final component, and an invalid path.
+- **Extent-based storage design.** Each directory entry has three extent slots describing runs of blocks. The extent module includes direct addressing and paths for additional levels of indirect tables, exploring how file growth can be represented when data is split across runs.
+- **Familiar interfaces.** The public API follows recognizable operations such as `fs_mkdir`, `fs_readdir`, `fs_stat`, and `b_open`. The buffered I/O design introduces a file-control-block table, per-file buffers, and byte offsets.
 
-The final phase is the implementation of the file operations.
+## Architecture and storage layout
 
-To help I have written the low level LBA based read and write.  The routines are in fsLow.o, the necessary header for you to include file is fsLow.h.  You do NOT need to understand the code in fsLow, but you do need to understand the header file and the functions.  There are 2 key functions:
+The shell calls the file-system API, which resolves paths and updates directory and allocation metadata. A supplied block-I/O layer provides `LBAread` and `LBAwrite` against the backing volume file. Both functions take a block count and starting LBA, and return the number of **blocks** transferred.
 
+The default configuration requests a **10,000,000-byte volume with 512-byte blocks**. The bitmap is sized for 19,531 logical blocks. The initial layout defined by the source is:
 
+| Logical blocks | Contents | Purpose |
+| --- | --- | --- |
+| `0` | Volume control block | Records the volume signature, block geometry, bitmap location, and root location. |
+| `1–5` | Free-space bitmap | Tracks which blocks are reserved or available. |
+| `6–10` | Initial root directory | Holds directory entries, including `.` and `..`. |
+| `11+` | Allocatable space | Used by additional directories, file storage, and extent tables. |
 
-`uint64_t LBAwrite (void * buffer, uint64_t lbaCount, uint64_t lbaPosition);`
+The partition layer stores an extra header before logical block `0`. When inspecting a volume with the bundled hexdump utility, physical file block `1` therefore corresponds to file-system LBA `0`.
 
-`uint64_t LBAread (void * buffer, uint64_t lbaCount, uint64_t lbaPosition);`
+### Directory metadata
 
-LBAread and LBAwrite take a buffer, a count of LBA blocks and the starting LBA block number (0 based).  The buffer must be large enough for the number of blocks * the block size.
+The `directoryEntry` structure combines a 256-byte name field, three extents, a starting location, a byte size, a directory flag, and creation, modification, and access timestamps. New directories reserve five blocks and initialize eight entries: two for `.` and `..`, and six for children.
 
-On return, these function returns the number of **blocks** read or written.
+### Allocation tradeoffs
 
+The bitmap keeps allocation metadata small and makes individual block updates straightforward. Finding a free run requires scanning the map, and a contiguous allocation can fail even when enough free blocks exist in separate regions.
 
+Extents describe each run as a starting block and a count. The design keeps the first runs in the directory entry and uses the third slot for an indirect table when more runs are needed. This separates a file's logical block position from its physical location and illustrates the tradeoff between compact metadata and additional lookup steps.
 
-In addition, I have written a hexdump utility that will allow you to analyze your volume file in the Hexdump subdirectory.
+## Source guide
 
-**Your assignment is to write a file system!** 
+| File | Responsibility |
+| --- | --- |
+| [`fsInit.c`](fsInit.c) | Volume formatting, signature checks, loading the root directory and bitmap, and shutdown. |
+| [`bitMap.c`](bitMap.c), [`bitMap.h`](bitMap.h) | Free-space representation, contiguous-run search, allocation, and block release. |
+| [`directory.c`](directory.c), [`directory.h`](directory.h) | Directory-entry representation, directory initialization, and file-entry creation. |
+| [`mfs.c`](mfs.c), [`mfs.h`](mfs.h) | Path parsing, navigation, directory iteration, metadata queries, moves, and removal. |
+| [`extents.c`](extents.c), [`extents.h`](extents.h) | Extent allocation and translation from file-relative blocks to LBAs. |
+| [`b_io.c`](b_io.c), [`b_io.h`](b_io.h) | Buffered file API, per-file state, and a table of up to 20 open file-control blocks. |
+| [`fileInfo.c`](fileInfo.c) | File-information lookup helper. |
+| [`fsshell.c`](fsshell.c) | Interactive command dispatch, Readline input, command history, and host-file transfer handlers. |
+| [`fsLow.h`](fsLow.h) | Interface to the supplied partition and block-I/O objects. |
+| [`Hexdump/`](Hexdump/) | Utility for inspecting the volume's raw bytes. |
+| [`MilestoneOne_writeup.pdf`](MilestoneOne_writeup.pdf) | Original milestone writeup. |
 
-You will need to format your volume, create and maintain a free space management system, initialize a root directory and maintain directory information, create, read, write, and delete files, and display info.  See below for specifics.
+For a focused code walkthrough, start with `formatVolume()` in `fsInit.c`, follow `allocateBlocks()` in `bitMap.c`, then read `parsePath()` in `mfs.c`. Together, these show how the project connects disk layout, allocation, and namespace operations.
 
-I have provided an initial “main” (fsShell.c) that will be the driver to test you file system.  Your group can modifiy this driver as needed.   The driver will be interactive (with all built in commands) to list directories, create directories, add and remove files, copy files, move files, and two “special commands” one to copy from the normal filesystem to your filesystem and the other from your filesystem to the normal filesystem.
+## Build and run
 
-You should modify this driver as needed for your filesystem, adding the display/setting of any additional meta data, and other functions you want to add.
+### Prerequisites
 
-The shell also calls two function in the file fsInit.c `initFileSystem` and `exitFileSystem` which are routines for you to fill in with whatever initialization and exit code you need for your file system.  
+Use a Linux environment with GCC, Make, GNU Readline development headers, and the standard C, math, and pthread libraries. The Makefile selects the supplied `fsLowM1.o` when `uname -m` reports `aarch64`, and `fsLow.o` otherwise; the selected object must match the target architecture and ABI.
 
-Some specifics - you need to provide the following interfaces:
+> Building from source requires `volumeControlBlock.h` and `fileInfo.h`, which are not included in this checkout.
 
-```
-b_io_fd b_open (char * filename, int flags);
-int b_read (b_io_fd fd, char * buffer, int count);
-int b_write (b_io_fd fd, char * buffer, int count);
-int b_seek (b_io_fd fd, off_t offset, int whence);
-int b_close (b_io_fd fd);
+From the repository root:
 
-```
+```sh
+# Build the application from source.
+make -B
 
-Note that the function are similar to the b_read you have done, there is a signifigant difference since you now write the function to find the file information.  
-You have to have methods of locating files, and knowing which logical block addresses are associated with the file.
-
-Directory Functions - see [https://www.thegeekstuff.com/2012/06/c-directory/](https://www.thegeekstuff.com/2012/06/c-directory/) for reference.
-
-```
-int fs_mkdir(const char *pathname, mode_t mode);
-int fs_rmdir(const char *pathname);
-fdDir * fs_opendir(const char *name);
-struct fs_diriteminfo *fs_readdir(fdDir *dirp);
-int fs_closedir(fdDir *dirp);
-
-char * fs_getcwd(char *buf, size_t size);
-int fs_setcwd(char *buf);   //linux chdir
-int fs_isFile(char * path);	//return 1 if file, 0 otherwise
-int fs_isDir(char * path);		//return 1 if directory, 0 otherwise
-int fs_delete(char* filename);	//removes a file
-
-// This is NOT the directory entry, it is JUST for readdir.
-struct fs_diriteminfo
-    {
-    unsigned short d_reclen;    /* length of this record */
-    unsigned char fileType;    
-    char d_name[256]; 			/* filename max filename is 255 characters */
-    };
-```
-Finally file stats - not all the fields in the structure are needed for this assingment
-
-```
-int fs_stat(const char *path, struct fs_stat *buf);
-
-struct fs_stat
-    {
-    off_t     st_size;    		/* total size, in bytes */
-    blksize_t st_blksize; 		/* blocksize for file system I/O */
-    blkcnt_t  st_blocks;  		/* number of 512B blocks allocated */
-    time_t    st_accesstime;   	/* time of last access */
-    time_t    st_modtime;   	/* time of last modification */
-    time_t    st_createtime;   	/* time of last status change */
-	
-    * add additional attributes here for your file system */
-    };
-
+# Open a separate demo volume using the project's default geometry.
+make run RUNOPTIONS="DemoVolume 10000000 512"
 ```
 
-These interfaces will also be provided to you in mfs.h.
+The executable takes three arguments:
 
-**Note:** You will need to modify mfs.h for the fdDIR strucutre to be what your file system need to maintain and track interation through the directory structure.
-
-A shell program designed to demonstrate your file system called fsshell.c is proviced.  It has a number of built in functions that will work if you implement the above interfaces, these are:
-```
-ls - Lists the file in a directory
-cp - Copies a file - source [dest]
-mv - Moves a file - source dest
-md - Make a new directory
-rm - Removes a file or directory
-touch - creates a file
-cat - (limited functionality) displays the contents of a file
-cp2l - Copies a file from the test file system to the linux file system
-cp2fs - Copies a file from the Linux file system to the test file system
-cd - Changes directory
-pwd - Prints the working directory
-history - Prints out the history
-help - Prints out help
+```text
+./fsshell <volume-file> <volume-size-in-bytes> <block-size-in-bytes>
 ```
 
+Using `DemoVolume` keeps the bundled `SampleVolume` available for inspection. The partition layer creates a new backing file if it does not exist; for an existing file, it uses the stored volume geometry. Keep the 512-byte block size and default volume size because several structures use fixed constants.
 
-This is deliberately vague, as it is dependent on your filesystem design.  And this all you may get initially for a real-world assignment, so if you have questions, please ask.
+For toolchains requiring common-symbol compatibility, use `make -B CFLAGS="-g -I. -fcommon"`.
 
-We will discuss some of this in class.
+### Shell walkthrough
 
-For our purposes use 10,000,000 or less (minimum 500,000) bytes for the volume size and 512 bytes per sector.  These are the values to pass into startPartitionSystem.
+Example session at the `Prompt >` prompt, creating and navigating a directory before removing it:
 
-What needs to be submitted (via GitHub and iLearn):
+```text
+help
+pwd
+ls
+md projects
+cd projects
+pwd
+ls
+cd /
+rm projects
+exit
+```
 
-* 	All source files (.c and .h)
-* 	Modified Driver program (must be a program that just utilizes the header file for your file system).
-* 	The Driver program must be named:  `fsshell.c`
-* 	A make file (named “Makefile”) to build your entire program
- 
-* A PDF writeup on project that should include (this is also submitted in iLearn):
-	* The github link for your group submission.
-	* A description of your file system
-	* Issues you had
-	* Detail of how your driver program works
-	* Screen shots showing each of the commands listed above
-* 	Your volume file (limit 10MB)
-*  There will also be an INDIVIDUAL report (form) to complete.
+Use `exit` to run file-system shutdown, write the in-memory bitmap, and close the partition. The shell's `cd` changes the directory inside the custom volume; host paths used by transfer commands remain relative to the process's host working directory.
 
+### Command reference
 
+| Command | Purpose |
+| --- | --- |
+| `ls [-a] [-l] [path]` | List directory contents, optionally including hidden entries or metadata. |
+| `md <path>` | Create a directory. |
+| `cd <path>` / `pwd` | Change or display the current directory. |
+| `mv <source> <destination>` | Move or rename an entry. |
+| `rm <path>` | Remove a file or an empty directory. |
+| `touch <path>` | Open or create a file entry. |
+| `history` / `help` | Show command history or built-in help. |
+| `exit` | Shut down the file system and close the backing file. |
 
+Additional handlers for `cp`, `cat`, `cp2l`, and `cp2fs` are included as part of the ongoing buffered-I/O work.
 
+## Inspecting the volume
+
+The hexdump utility can be built independently of the file system:
+
+```sh
+make -C Hexdump -B
+./Hexdump/hexdump --file SampleVolume --start 0 --count 12
+```
+
+`--start` and `--count` are measured in 512-byte blocks. This view includes the partition header and the initial file-system metadata region, making it useful for comparing the storage layout with the bytes written to disk.
+
+## Team and attribution
+
+Developed by **Evan Giampaoli, Nathan Rennacker, Hann Zhao, and Antonio Indindoli** as **Team EHNA** for CSC 415: Operating Systems, Fall 2022.
+
+The course provided the low-level partition/block-I/O layer, initial shell driver, API scaffolding, and hexdump utility, credited to Professor Robert Bierman. The team's work builds on that foundation with volume organization, free-space management, directory operations, and file-storage components.
